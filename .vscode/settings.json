@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "peripheralpins.h": "c",
+        "cmath": "cpp"
+    }
+}
