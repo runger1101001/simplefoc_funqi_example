@@ -24,14 +24,13 @@ void printDriverStatus();
 
 void setup() {
     Serial.begin(115200);
+    SimpleFOCDebug::enable();
     delay(5000);
     Serial.println("Welcome to FunQi Driver Firmware");
-
 
     Serial.println("Initializing CORDIC");
     if (!SimpleFOC_CORDIC_Config())
         Serial.println("CORDIC init failed");
-
 
     Serial.println("Initializing LED");
     pix.begin();
@@ -41,17 +40,26 @@ void setup() {
 
     Serial.println("Initializing Driver");
     driver.voltage_power_supply = 12.0f;
-    driver.voltage_limit = 5.0f;
+    driver.voltage_limit = 10.0f;
     driver.init();
     delay(1);
 
     Serial.print("Driver ready: ");
     Serial.println(driver.isReady()?"true":"false");
+    Serial.print("Driver fault: ");
+    Serial.println(driver.isFault()?"true":"false");    
     printDriverStatus();
     Serial.println("Clearing faults, unlocking driver...");
     driver.unlock();
+    STSPIN32G4PowMng powmng = driver.getPowMngRegister();
+    Serial.print("VCC voltage: ");
+    Serial.println(powmng.vcc_val);
+    powmng.vcc_val = 0b01;
+    driver.setPowMngRegister(powmng);
+    Serial.println("Set VCC to 10V");
     driver.clearFaults();
     printDriverStatus();
+    driver.lock();
 
     Serial.println("Initializing Motor");
     motor.voltage_limit = driver.voltage_limit / 2.0f;
@@ -59,16 +67,21 @@ void setup() {
     motor.linkDriver(&driver);
     motor.init();
 
+    motor.enable();
+    Serial.println("Motor enabled");
+
     pix.setPixelColor(0, 0, 102, 0);
     pix.show();
+    Serial.println("Setup complete");
 }
 
 void loop(){
     // CORDIC test
-    float a = millis() / 159.235668789808917f / 20;
-    Serial.println(_sin(a),4);
-    delay(1000);
-    // motor.move(5.0f);
+    // float a = millis() / 159.235668789808917f / 20;
+    // Serial.println(_sin(a),4);
+    // delay(1000);
+    motor.move(5.0f);
+    delayMicroseconds(100);
 }
 
 
