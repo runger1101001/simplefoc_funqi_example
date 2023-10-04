@@ -40,9 +40,9 @@ void setup() {
     digitalWrite(FUNQI_PIN_INXL, LOW); // disable 4th channel for now
     digitalWrite(FUNQI_PIN_INXH, LOW);
 
-    // Serial.println("Initializing CORDIC");
-    // if (!SimpleFOC_CORDIC_Config())
-    //     Serial.println("CORDIC init failed");
+    Serial.println("Initializing CORDIC");
+    if (!SimpleFOC_CORDIC_Config())
+        Serial.println("CORDIC init failed");
 
     Serial.println("Initializing LED");
     pix.begin();
@@ -118,10 +118,10 @@ void loop(){
     if (now-ts>1000) {
         Serial.print("It/s: ");
         Serial.print(count);
-        Serial.print("   Fault: ");
+        Serial.print("  Fault: ");
         Serial.print(driver.isFault()?"true":"false");
-        Serial.print("   Angle: ");
-        Serial.println(motor.shaft_angle);        
+        Serial.print("  Angle: ");
+        Serial.println(motor.shaft_angle);
         count = 0;
         ts = now;
     }
