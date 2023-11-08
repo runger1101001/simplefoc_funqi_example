@@ -15,6 +15,7 @@ Features:
 - MT6835 driver for sensor
 - STM32 CORDIC accellerated trig functions
 - NeoPixel for status indication
+- Stores motor calibration to internal Flash for fast start
 
 
 ## Software setup

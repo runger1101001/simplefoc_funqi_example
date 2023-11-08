@@ -5,17 +5,17 @@
 #include "utilities/stm32math/STM32G4CORDICTrigFunctions.h"
 #include "Adafruit_NeoPixel.h"
 #include "encoders/mt6835/MagneticSensorMT6835.h"
-
+#include "settings/stm32/STM32FlashSettingsStorage.h"
 
 #define FUNQI_PIN_NEOPIXEL PA10
 
 #define FUNQI_PIN_INXL  PB0
 #define FUNQI_PIN_INXH  PA14
 
-#define FUNQI_PIN_MOSI PB5
-#define FUNQI_PIN_MISO PB4
-#define FUNQI_PIN_SCK  PB3
-#define FUNQI_PIN_CS   PA15
+#define FUNQI_PIN_MOSI PA7
+#define FUNQI_PIN_MISO PA6
+#define FUNQI_PIN_SCK  PA5
+#define FUNQI_PIN_CS   PD2
 
 
 Adafruit_NeoPixel pix = Adafruit_NeoPixel(1, FUNQI_PIN_NEOPIXEL, NEO_GRB + NEO_KHZ800);
@@ -24,10 +24,25 @@ STSPIN32G4 driver = STSPIN32G4();
 BLDCMotor motor = BLDCMotor(11);
 
 SPIClass sensorSPI = SPIClass(FUNQI_PIN_MOSI, FUNQI_PIN_MISO, FUNQI_PIN_SCK);
-MagneticSensorMT6835 sensor = MagneticSensorMT6835(FUNQI_PIN_CS);
+SPISettings myMT6835SPISettings(2000000, MT6835_BITORDER, SPI_MODE3);
+MagneticSensorMT6835 sensor = MagneticSensorMT6835(FUNQI_PIN_CS, myMT6835SPISettings);
 
-Commander commander;
+STM32FlashSettingsStorage settings = STM32FlashSettingsStorage(); // use top page of flash for settings (2kB)
+Commander commander = Commander(Serial);
 void onMotor(char* cmd) { commander.motor(&motor, cmd); }
+void doSaveSettings(char *cmd) { settings.saveSettings(); }
+void doLoadSettings(char *cmd) { settings.loadSettings(); }
+void doCalibration(char *cmd) { 
+    motor.sensor_direction = Direction::UNKNOWN;
+    motor.zero_electric_angle = 0.0f;
+    Serial.println("Motor calibration...");
+    motor.initFOC();
+    Serial.println("Calibration found:");
+    Serial.print("   Direction: Direction::");
+    Serial.println((motor.sensor_direction==Direction::CW)?"CW":((motor.sensor_direction==Direction::CCW)?"CCW":"UNKNOWN"));
+    Serial.print("  Zero Angle: ");
+    Serial.println(motor.zero_electric_angle, 6);
+ }
 
 void printDriverStatus();
 
@@ -84,12 +99,13 @@ void setup() {
     // Serial.println(driver.isFault()?"true":"false");    
 
     Serial.println("Initializing Sensor");
+    sensor.checkcrc = true;
     sensor.init(&sensorSPI);
     MT6835Options1 options1 = sensor.getOptions1();
-    options1.uvw_off = 0b1;
-    sensor.setOptions1(options1);
-    sensor.setABZEnabled(true);
-    sensor.setABZResolution(16000-1); // sets 16000 PPR
+    // options1.uvw_off = 0b1;
+    // sensor.setOptions1(options1);
+    // sensor.setABZEnabled(true);
+    // sensor.setABZResolution(16000-1); // sets 16000 PPR
     Serial.println("Sensor initialized, start angle: ");
     Serial.println(sensor.getAngle());
 
@@ -101,28 +117,65 @@ void setup() {
     motor.motion_downsample = 4;
     motor.linkDriver(&driver);
     motor.linkSensor(&sensor);
+
+    Serial.println("Initializing Settings");
+    settings.addMotor(&motor);
+    SimpleFOCRegister regs[] = SIMPLEFOC_SETTINGS_REGISTERS_MINIMAL;
+    settings.setRegisters(regs, 2);
+    settings.init();
+    SettingsStatus loadStatus = settings.loadSettings();
+
     motor.init();
     Serial.println("Motor enabled");
 
     pix.setPixelColor(0, 0, 52, 46);
     pix.show();
-    Serial.println("Motor calibration...");
+    if (loadStatus == SFOC_SETTINGS_SUCCESS) {
+        Serial.println("Calibration loaded:");
+        Serial.print("   Direction: Direction::");
+        Serial.println((motor.sensor_direction==Direction::CW)?"CW":((motor.sensor_direction==Direction::CCW)?"CCW":"UNKNOWN"));
+        Serial.print("  Zero Angle: ");
+        Serial.println(motor.zero_electric_angle, 6);
+    }
+    else
+        Serial.println("Motor calibration...");
     motor.initFOC();
+    if (motor.motor_status == FOCMotorStatus::motor_ready && loadStatus != SFOC_SETTINGS_SUCCESS) {
+        Serial.println("Calibration found:");
+        Serial.print("   Direction: Direction::");
+        Serial.println((motor.sensor_direction==Direction::CW)?"CW":((motor.sensor_direction==Direction::CCW)?"CCW":"UNKNOWN"));
+        Serial.print("  Zero Angle: ");
+        Serial.println(motor.zero_electric_angle, 6);
+        Serial.println("Saving calibration...");
+        settings.saveSettings();
+        loadStatus = settings.loadSettings();
+        if (loadStatus == SFOC_SETTINGS_SUCCESS)
+            Serial.println("Save successful");
+        else
+            Serial.println("Save failed");
+    }
+    if (motor.motor_status == FOCMotorStatus::motor_ready)
+        pix.setPixelColor(0, 0, 52, 0);
+    else
+        pix.setPixelColor(0, 52, 0, 0);
+    pix.show();
 
     Serial.println("Initializing comms");
     commander.add('M', onMotor, "Motor 1");
+    commander.add('S', doSaveSettings, "Save settings");
+    commander.add('L', doLoadSettings, "Load settings");
+    commander.add('C', doCalibration, "Calibrate motor");
 
-    pix.setPixelColor(0, 0, 52, 0);
-    pix.show();
     Serial.println("Setup complete");
     ts = millis();
-    motor.target = 5.0f;
+    motor.target = 0.0f;
 }
 
 
 
 
 int count = 0;
+int crcerrs = 0;
 
 void loop(){
     uint32_t now = millis();
@@ -132,13 +185,21 @@ void loop(){
         Serial.print("  Fault: ");
         Serial.print(driver.isFault()?"true":"false");
         Serial.print("  Angle: ");
-        Serial.println(sensor.getAngle());
+        Serial.print(sensor.getAngle());
+        Serial.print("  Status: ");
+        Serial.print(sensor.getStatus());
+        Serial.print("  CRC Errs: ");
+        Serial.println(crcerrs);
         count = 0;
+        crcerrs = 0;
         ts = now;
     }
     count++;
     motor.move();
     motor.loopFOC();
+    if (sensor.getStatus() & MT6835_CRC_ERROR) {
+        crcerrs++;
+    }
     commander.run();
 }
 

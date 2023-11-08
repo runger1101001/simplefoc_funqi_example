@@ -32,7 +32,7 @@
   "name": "STM32G431VB",
   "upload": {
     "maximum_ram_size": 32768,
-    "maximum_size": 131072,
+    "maximum_size": 129024,
     "protocol": "stlink",
     "protocols": [
       "stlink",
